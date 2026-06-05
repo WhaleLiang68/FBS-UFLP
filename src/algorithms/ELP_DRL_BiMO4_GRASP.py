@@ -570,6 +570,13 @@ class ELP(_BiMO4ELP):
                 self._observe_feasible_state(candidate)
                 self.s = self._light_clone_solution(candidate)
                 break
+        if self.pareto_archive:
+            return
+        fallback = self._light_clone_solution(template_solution)
+        self._evaluate_solution(fallback)
+        if bool(getattr(fallback, "current_is_feasible", False)):
+            self._observe_feasible_state(fallback)
+            self.s = self._light_clone_solution(fallback)
 
     # ------------------------------------------------------------------
     # 结果落盘

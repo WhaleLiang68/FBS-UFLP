@@ -9,6 +9,13 @@ import gym
 import numpy as np
 from loguru import logger
 
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    _TENSORBOARD_AVAILABLE = True
+except Exception:
+    SummaryWriter = None
+    _TENSORBOARD_AVAILABLE = False
+
 import src
 import src.utils.ExperimentsUtil as ExperimentsUtil
 import src.utils.FBSUtil as FBSUtil
@@ -2105,6 +2112,9 @@ class ELP(StandardELP):
             return super()._accept_candidate(current_cost, candidate_cost)
         return self._accept_candidate_with_context(current, candidate)
 
+    def _archive_candidate_before_current_update(self, candidate, accept):
+        return False
+
     def _compute_transition_reward(
         self,
         previous_cost,
@@ -2155,17 +2165,20 @@ class ELP(StandardELP):
         candidate = copy.deepcopy(self.s)
         self._apply_recipe(candidate, self.diversify_recipe)
         self._evaluate_solution(candidate)
+        previous_best = self.best_feasible_cost
+        previous_cost = self.s.fitness
+        previous_d_inf = self.s.current_d_inf
         self._pending_candidate = candidate
         accept, prob, _, _ = self._accept_candidate(self.s.fitness, candidate.fitness)
         self._pending_candidate = None
         self.prob_history.append(prob)
+        candidate_archive_improved = self._archive_candidate_before_current_update(candidate, accept=accept)
         if accept:
-            previous_best = self.best_feasible_cost
-            previous_cost = self.s.fitness
-            previous_d_inf = self.s.current_d_inf
             self.s = candidate
             self.current_energy = self.s.fitness
-            archive_improved = self._observe_feasible_state(self.s)
+            archive_improved = bool(candidate_archive_improved)
+            if not archive_improved:
+                archive_improved = self._observe_feasible_state(self.s)
             improved = bool(archive_improved)
             reward = self._compute_transition_reward(
                 previous_cost,
@@ -2180,9 +2193,19 @@ class ELP(StandardELP):
             else:
                 self.no_improve_steps += 1
         else:
-            improved = False
-            self.no_improve_steps += 1
-            reward = -0.2
+            improved = bool(candidate_archive_improved)
+            if improved:
+                self.no_improve_steps = 0
+            else:
+                self.no_improve_steps += 1
+            reward = self._compute_transition_reward(
+                previous_cost,
+                self.s.fitness,
+                previous_d_inf,
+                self.s.current_d_inf,
+                previous_best,
+                accept=False,
+            )
         self._note_diversification(accepted=accept)
         self._record_mo_event(
             "diversification",
@@ -2833,6 +2856,19 @@ class ELP(StandardELP):
         total_steps = max(1, self.G * self.t_max)
         next_progress_marker_idx = 0
         wall_time_terminated = False
+
+        # TensorBoard writer (optional, independent of dashboard)
+        tb_writer = None
+        tb_log_dir = None
+        if _TENSORBOARD_AVAILABLE and os.environ.get("ELP_TENSORBOARD_ENABLE", "").strip() in {"1", "true", "yes", "on"}:
+            tb_log_dir = os.path.join(
+                config.RESULT_PATH, "tensorboard_logs",
+                run_algorithm or "unknown",
+                f"{instance_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            )
+            os.makedirs(tb_log_dir, exist_ok=True)
+            tb_writer = SummaryWriter(log_dir=tb_log_dir)
+            logger.info(f"TensorBoard logging enabled: {tb_log_dir}")
         for episode in range(self.G):
             if self._wall_time_limit_reached(start_time):
                 wall_time_terminated = True
@@ -2892,12 +2928,15 @@ class ELP(StandardELP):
                 self._pending_candidate = None
                 self.prob_history.append(prob)
                 self._record_acceptance(accept)
+                candidate_archive_improved = self._archive_candidate_before_current_update(candidate, accept=accept)
                 improved = False
 
                 if accept:
                     self.s = candidate
                     self.current_energy = self.s.fitness
-                    archive_improved = self._observe_feasible_state(self.s)
+                    archive_improved = bool(candidate_archive_improved)
+                    if not archive_improved:
+                        archive_improved = self._observe_feasible_state(self.s)
                     if self._last_transition_meta:
                         self._last_transition_meta["archive_would_change"] = bool(archive_improved)
                     if archive_improved:
@@ -2958,7 +2997,12 @@ class ELP(StandardELP):
 
                 else:
                     self._update_histogram(self.s.fitness)
-                    self.no_improve_steps += 1
+                    if candidate_archive_improved:
+                        self._record_action_global_best(real_action_idx, phase="main")
+                        improved = True
+                        self.no_improve_steps = 0
+                    else:
+                        self.no_improve_steps += 1
 
                 if improved:
                     self.no_improve_steps = 0
@@ -3042,6 +3086,25 @@ class ELP(StandardELP):
             else:
                 self.episodes_without_improvement += 1
             agent.decay_epsilon()
+
+            # TensorBoard per-episode logging
+            if tb_writer is not None:
+                episode_idx = int(episode)
+                tb_writer.add_scalar("Episode/decisionScore", self._safe_float(self.best_feasible_cost), episode_idx)
+                tb_writer.add_scalar("Episode/paretoArchiveSize", int(len(self.pareto_archive)), episode_idx)
+                tb_writer.add_scalar("Episode/temperature", self._safe_float(self.T), episode_idx)
+                tb_writer.add_scalar("Episode/epsilon", self._safe_float(getattr(agent, "epsilon", None)), episode_idx)
+                tb_writer.add_scalar("Episode/episodesWithoutImprovement", int(self.episodes_without_improvement), episode_idx)
+                if hasattr(self, "_last_loss_value") and self._last_loss_value is not None:
+                    tb_writer.add_scalar("Training/loss", float(self._last_loss_value), episode_idx)
+                # Archive objective stats
+                if self.pareto_archive:
+                    mhc_vals = [float(getattr(sol, "MHC", 0) or 0) for sol in self.pareto_archive]
+                    cr_vals = [float(getattr(sol, "CR", 0) or 0) for sol in self.pareto_archive]
+                    if mhc_vals:
+                        tb_writer.add_scalar("Archive/medianMHC", float(np.median(mhc_vals)), episode_idx)
+                    if cr_vals:
+                        tb_writer.add_scalar("Archive/medianCR", float(np.median(cr_vals)), episode_idx)
 
         while (not wall_time_terminated) and next_progress_marker_idx < len(self.progress_markers):
             self._log_training_progress(self.progress_markers[next_progress_marker_idx], start_time)
@@ -3157,6 +3220,13 @@ class ELP(StandardELP):
             "mo_action_stats_path": self.mo_run_summary.get("actionStatsPath"),
             "mo_run_summary_path": self.mo_run_summary.get("runSummaryPath"),
         }
+        if tb_writer is not None:
+            tb_writer.add_scalar("Final/decisionScore", self._safe_float(best_energy), 0)
+            tb_writer.add_scalar("Final/paretoArchiveSize", int(len(self.pareto_archive)), 0)
+            tb_writer.add_scalar("Final/totalSteps", int(global_step), 0)
+            tb_writer.close()
+            logger.info(f"TensorBoard logs saved to: {tb_log_dir}")
+
         return global_step, is_valid, best_solution, best_energy, start_time, end_time, fast_time
 
 

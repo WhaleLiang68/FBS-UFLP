@@ -1,14 +1,20 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
+from tools.run_bimo4_comparison import ALGORITHM_SPECS
+from tools.run_bimo4_comparison import build_run_env
 from src.utils.BiMO4BenchmarkUtil import build_reference_fronts
 from src.utils.BiMO4BenchmarkUtil import compute_unified_metrics
 from src.utils.BiMO4BenchmarkUtil import filter_nondominated
+from src.utils.BiMO4BenchmarkUtil import load_benchmark_runs
 from src.utils.BiMO4BenchmarkUtil import parse_benchmark_remark
 
 
@@ -21,6 +27,121 @@ class TestBiMO4BenchmarkUtil(unittest.TestCase):
         self.assertEqual(payload["budget_seconds"], "1800")
         self.assertEqual(payload["seed"], "20260526")
         self.assertEqual(payload["phase"], "main")
+
+    def test_runner_has_distinct_bimo4_variant_specs(self):
+        bimo4 = ALGORITHM_SPECS["bimo4"]
+        mechfix = ALGORITHM_SPECS["bimo4_mechfix"]
+        paperls_intensify = ALGORITHM_SPECS["bimo4_paperls_intensify"]
+
+        self.assertEqual(bimo4.algorithm_name, "ELP_DRL_BiMO4")
+        self.assertEqual(bimo4.extra_env["ELP_BIMO_CR_PAIR_INSERT_ENABLE"], "0")
+        self.assertEqual(bimo4.extra_env["ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE"], "1")
+        self.assertEqual(mechfix.algorithm_name, "ELP_DRL_BiMO4_MECHFIX")
+        self.assertEqual(mechfix.extra_env["ELP_BIMO_CR_PAIR_INSERT_ENABLE"], "0")
+        self.assertEqual(mechfix.extra_env["ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE"], "0")
+        self.assertEqual(paperls_intensify.algorithm_name, "ELP_DRL_BiMO4_PAPERLS_INTENSIFY")
+        self.assertEqual(paperls_intensify.extra_env["ELP_BIMO_CR_PAIR_INSERT_ENABLE"], "0")
+        self.assertEqual(paperls_intensify.extra_env["ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE"], "1")
+        self.assertEqual(paperls_intensify.extra_env["ELP_BIMO_ARCHIVE_PAPERLS_ENABLE"], "1")
+        self.assertEqual(paperls_intensify.extra_env["ELP_BIMO_ARCHIVE_PAPERLS_RESERVE_SECONDS"], "80")
+        self.assertEqual(paperls_intensify.extra_env["ELP_BIMO_ARCHIVE_PAPERLS_TIME_LIMIT_SECONDS"], "80")
+        self.assertNotIn("bimo4_cr17only_b24e3", ALGORITHM_SPECS)
+        self.assertNotIn("bimo4_cr17nosplit_b24e3", ALGORITHM_SPECS)
+        self.assertNotIn("bimo4_cr17adaptive_b24e3", ALGORITHM_SPECS)
+        self.assertNotIn("bimo4_paperls_2only", ALGORITHM_SPECS)
+        self.assertNotIn("bimo4_paperls_3only", ALGORITHM_SPECS)
+        self.assertNotIn("bimo4_paperls_2plus3", ALGORITHM_SPECS)
+        self.assertNotIn("bimo4_paperls_current80", ALGORITHM_SPECS)
+        self.assertNotIn("bimo4_paperls_oldpool", ALGORITHM_SPECS)
+
+    def test_runner_env_drops_inherited_fixed_seeds(self):
+        args = SimpleNamespace(
+            benchmark_id="seed_guard",
+            bimo4_g=1000,
+            bimo4_t_max=300,
+            grasp_g=1000,
+            grasp_t_max=300,
+            baseline_pop=64,
+            baseline_gen=80,
+            baseline_seq_len=300,
+        )
+        row = {
+            "algorithm_key": "bimo4_paperls_intensify",
+            "budget_seconds": 600,
+            "seed": 20260601,
+            "phase": "validation",
+            "instance": "AB20-ar3",
+        }
+
+        with patch.dict(os.environ, {"ELP_FIXED_SEEDS": "20260328", "ELP_BASE_SEED": "1"}, clear=False):
+            env = build_run_env(args, row)
+
+        self.assertNotIn("ELP_FIXED_SEEDS", env)
+        self.assertEqual(env["ELP_BASE_SEED"], "20260601")
+        self.assertIn("seed=20260601", env["ELP_EXP_REMARK"])
+
+    def test_runner_env_isolates_inherited_algorithm_switches(self):
+        args = SimpleNamespace(
+            benchmark_id="env_guard",
+            bimo4_g=1000,
+            bimo4_t_max=300,
+            grasp_g=1000,
+            grasp_t_max=300,
+            baseline_pop=64,
+            baseline_gen=80,
+            baseline_seq_len=300,
+        )
+        row = {
+            "algorithm_key": "bimo4_paperls_intensify",
+            "budget_seconds": 600,
+            "seed": 20260601,
+            "phase": "validation",
+            "instance": "AB20-ar3",
+        }
+        inherited = {
+            "ELP_BIMO_CR_PAIR_INSERT_ENABLE": "1",
+            "ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE": "0",
+            "ELP_BIMO_CR_BOUNDARY_REPARTITION_BUDGET": "999",
+            "ELP_GRASP_LOCAL_SEARCH_BACKEND": "engineered",
+            "ELP_MO_BASELINE_ALGO": "nsga2",
+            "ELP_MO_BASELINE_POP": "999",
+        }
+
+        with patch.dict(os.environ, inherited, clear=False):
+            env = build_run_env(args, row)
+
+        self.assertEqual(env["ELP_BIMO_CR_PAIR_INSERT_ENABLE"], "0")
+        self.assertEqual(env["ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE"], "1")
+        self.assertNotIn("ELP_BIMO_CR_BOUNDARY_REPARTITION_BUDGET", env)
+        self.assertNotIn("ELP_GRASP_LOCAL_SEARCH_BACKEND", env)
+        self.assertNotIn("ELP_MO_BASELINE_ALGO", env)
+        self.assertEqual(env["ELP_MO_BASELINE_POP"], "64")
+
+    def test_runner_env_disables_action16_for_default_bimo4_after_isolation(self):
+        args = SimpleNamespace(
+            benchmark_id="env_guard",
+            bimo4_g=1000,
+            bimo4_t_max=300,
+            grasp_g=1000,
+            grasp_t_max=300,
+            baseline_pop=64,
+            baseline_gen=80,
+            baseline_seq_len=300,
+        )
+        row = {
+            "algorithm_key": "bimo4",
+            "budget_seconds": 600,
+            "seed": 20260601,
+            "phase": "validation",
+            "instance": "AB20-ar3",
+        }
+
+        with patch.dict(os.environ, {"ELP_BIMO_CR_PAIR_INSERT_ENABLE": "1"}, clear=False):
+            env = build_run_env(args, row)
+
+        self.assertEqual(env["ELP_BIMO_CR_PAIR_INSERT_ENABLE"], "0")
+        self.assertEqual(env["ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE"], "1")
+        self.assertNotIn("ELP_BIMO_CR_BOUNDARY_REPARTITION_BUDGET", env)
 
     def test_filter_nondominated_2d(self):
         points = np.asarray(
@@ -35,6 +156,53 @@ class TestBiMO4BenchmarkUtil(unittest.TestCase):
         filtered = filter_nondominated(points)
         self.assertEqual(filtered.shape[0], 3)
         self.assertFalse(np.any(np.all(np.isclose(filtered, [3.5, 3.5]), axis=1)))
+
+    def test_load_benchmark_runs_reads_snake_case_paperls_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            result_root = Path(tmp_dir)
+            csv_path = result_root / "Du62-ELP_DRL_BiMO4_PAPERLS_INTENSIFY.csv"
+            row = {
+                "实例": "Du62",
+                "算法": "ELP_DRL_BiMO4_PAPERLS_INTENSIFY",
+                "日期": "2026-06-03",
+                "迭代次数": 1,
+                "解": "[]",
+                "适应度值": 0.1,
+                "开始时间": "2026-06-03 10:00:00",
+                "最快时间": "2026-06-03 10:00:00",
+                "结束时间": "2026-06-03 10:10:00",
+                "运行时间（秒）": 600.0,
+                "最快最佳结果时间（秒）": 600.0,
+                "宽高比是否满足": True,
+                "gbest更新次数": 0,
+                "备注": "benchmark_id=bench;budget_seconds=600;seed=20260601;phase=validation",
+            }
+            row.update(
+                {
+                    "rep_mhc": 1.0,
+                    "rep_cr": 2.0,
+                    "archive_paperls_enabled": True,
+                    "archive_paperls_stats": "{'anchorsUsed': 8, 'anchorDiagnostics': []}",
+                    "main_wall_time_limit_seconds": 520.0,
+                    "wall_time_limit_seconds": 600.0,
+                }
+            )
+            pd.DataFrame(
+                [row]
+            ).to_csv(csv_path, index=False, encoding="utf-8-sig")
+
+            runs = load_benchmark_runs(
+                "bench",
+                instances=["Du62"],
+                algorithms=["ELP_DRL_BiMO4_PAPERLS_INTENSIFY"],
+                result_root=result_root,
+            )
+
+        self.assertEqual(len(runs), 1)
+        row = runs.iloc[0]
+        self.assertIn(str(row["archive_paperls_enabled"]).lower(), {"true", "1"})
+        self.assertIn("anchorsUsed", row["archive_paperls_stats"])
+        self.assertEqual(row["main_wall_time_limit_seconds"], 520.0)
 
     def test_build_reference_fronts_and_unified_metrics(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

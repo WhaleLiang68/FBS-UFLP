@@ -326,7 +326,44 @@ def load_benchmark_runs(
                     "archive_hypervolume_raw": coerce_float(record.get("HV"), default=None),
                     "archive_spacing_raw": coerce_float(record.get("Spread(Δ)"), default=None),
                     "archive_igd_raw": coerce_float(record.get("IGD"), default=None),
+                    "archive_size": coerce_int(record.get("archiveSize"), default=coerce_int(record.get("pareto_size"), default=None)),
                     "pareto_archive_path": record.get("pareto_archive_path"),
+                    "candidate_pool_size": coerce_int(
+                        record.get("candidatePoolSize"),
+                        default=coerce_int(record.get("candidate_pool_size"), default=None),
+                    ),
+                    "candidate_pool_limit": coerce_int(
+                        record.get("candidatePoolLimit"),
+                        default=coerce_int(record.get("candidate_pool_limit"), default=None),
+                    ),
+                    "candidate_pool_insertions": coerce_int(
+                        record.get("candidatePoolInsertions"),
+                        default=coerce_int(record.get("candidate_pool_insertions"), default=None),
+                    ),
+                    "candidate_pool_duplicates": coerce_int(
+                        record.get("candidatePoolDuplicates"),
+                        default=coerce_int(record.get("candidate_pool_duplicates"), default=None),
+                    ),
+                    "candidate_pool_bootstrap_target": coerce_int(
+                        record.get("candidatePoolBootstrapTarget"),
+                        default=coerce_int(record.get("candidate_pool_bootstrap_target"), default=None),
+                    ),
+                    "archive_paperls_enabled": record.get(
+                        "archivePaperLsEnabled",
+                        record.get("archive_paperls_enabled"),
+                    ),
+                    "archive_paperls_stats": record.get(
+                        "archivePaperLsStats",
+                        record.get("archive_paperls_stats"),
+                    ),
+                    "main_wall_time_limit_seconds": coerce_float(
+                        record.get("mainWallTimeLimitSeconds"),
+                        default=coerce_float(record.get("main_wall_time_limit_seconds"), default=None),
+                    ),
+                    "wall_time_limit_seconds": coerce_float(
+                        record.get("wallTimeLimitSeconds"),
+                        default=coerce_float(record.get("wall_time_limit_seconds"), default=None),
+                    ),
                     "wall_time_terminated": record.get("wall_time_terminated"),
                     "baseline_seed": coerce_int(record.get("baseline_seed"), default=None),
                     "baseline_generations": coerce_int(record.get("baseline_generations"), default=None),

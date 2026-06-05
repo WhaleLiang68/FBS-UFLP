@@ -156,7 +156,7 @@ class DataProcessingEnv(gym.Env):
             dtype=np.float64,
         )
         self.distance_metric = "manhattan"
-        self.k_penalty = 1
+        self.true_cost_penalty_scale = 1
         self._clear_runtime_tracking()
 
     def __getstate__(self):
@@ -231,14 +231,14 @@ class DataProcessingEnv(gym.Env):
         self.current_v_worst = metrics.get("v_ref", metrics.get("v_worst"))
 
     def _evaluate_current_layout(self, snapshot_best: bool = True) -> Dict[str, Any]:
-        metrics = FBSUtil.evaluate_layout(
+        metrics = FBSUtil.evaluate_layout_true_cost(
             self.fbs_model,
             self.areas,
             self.H,
             self.F,
             self.aspect_limits,
             v_worst=self._runtime_v_worst(),
-            k_penalty=self.k_penalty,
+            true_cost_penalty_scale=self.true_cost_penalty_scale,
             distance_metric=self.distance_metric,
         )
         self._sync_metrics(metrics)
@@ -328,7 +328,7 @@ class DataProcessingEnv(gym.Env):
                 self.F,
                 self.aspect_limits,
                 v_worst=self._runtime_v_worst(),
-                k_penalty=self.k_penalty,
+                k_penalty=self.true_cost_penalty_scale,
                 distance_metric=self.distance_metric,
             )
         elif action_name == "segment_insert":
@@ -340,7 +340,7 @@ class DataProcessingEnv(gym.Env):
                 self.F,
                 self.aspect_limits,
                 v_worst=self._runtime_v_worst(),
-                k_penalty=self.k_penalty,
+                k_penalty=self.true_cost_penalty_scale,
                 distance_metric=self.distance_metric,
             )
         elif action_name == "cross_bay_relocate":
@@ -352,7 +352,7 @@ class DataProcessingEnv(gym.Env):
                 self.F,
                 self.aspect_limits,
                 v_worst=self._runtime_v_worst(),
-                k_penalty=self.k_penalty,
+                k_penalty=self.true_cost_penalty_scale,
                 distance_metric=self.distance_metric,
             )
         elif action_name == "bay_split_by_flow":
@@ -364,7 +364,7 @@ class DataProcessingEnv(gym.Env):
                 self.F,
                 self.aspect_limits,
                 v_worst=self._runtime_v_worst(),
-                k_penalty=self.k_penalty,
+                k_penalty=self.true_cost_penalty_scale,
                 distance_metric=self.distance_metric,
             )
         elif action_name == "bay_merge_by_flow":
@@ -376,7 +376,7 @@ class DataProcessingEnv(gym.Env):
                 self.F,
                 self.aspect_limits,
                 v_worst=self._runtime_v_worst(),
-                k_penalty=self.k_penalty,
+                k_penalty=self.true_cost_penalty_scale,
                 distance_metric=self.distance_metric,
             )
         elif action_name == "adjacent_bay_repartition_by_flow":
@@ -388,7 +388,7 @@ class DataProcessingEnv(gym.Env):
                 self.F,
                 self.aspect_limits,
                 v_worst=self._runtime_v_worst(),
-                k_penalty=self.k_penalty,
+                k_penalty=self.true_cost_penalty_scale,
                 distance_metric=self.distance_metric,
             )
         elif action_name == "adjacent_bay_block_repartition_by_flow":
@@ -400,7 +400,7 @@ class DataProcessingEnv(gym.Env):
                 self.F,
                 self.aspect_limits,
                 v_worst=self._runtime_v_worst(),
-                k_penalty=self.k_penalty,
+                k_penalty=self.true_cost_penalty_scale,
                 distance_metric=self.distance_metric,
             )
         elif action_name == "ga_action":

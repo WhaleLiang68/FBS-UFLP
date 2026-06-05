@@ -2372,7 +2372,7 @@ def calculate_d_inf(fac_b, fac_h, area, fac_limit_aspect):
     return d_inf, infeasible_mask, lower_bounds, upper_bounds, aspect_limits
 
 
-def calculate_cost(
+def calculate_true_cost(
     mhc,
     fac_b,
     fac_h,
@@ -2380,7 +2380,7 @@ def calculate_cost(
     fac_limit_aspect,
     v_ref=None,
     v_worst=None,
-    k_penalty=0.5,
+    true_cost_penalty_scale=0.35,
     tau=0.2,
     alpha=0.7,
     beta=10.0,
@@ -2431,7 +2431,7 @@ def calculate_cost(
             ref_cost = mhc_value
         else:
             ref_cost = float(v_ref)
-        cost = mhc_value + float(k_penalty) * ref_cost * violation_sum
+        cost = mhc_value + float(true_cost_penalty_scale) * ref_cost * violation_sum
     return {
         "cost": cost,
         "d_inf": d_inf,
@@ -2445,7 +2445,7 @@ def calculate_cost(
     }
 
 
-def evaluate_layout(
+def evaluate_layout_true_cost(
     fbs_model: FBSModel,
     area,
     H,
@@ -2453,7 +2453,7 @@ def evaluate_layout(
     fac_limit_aspect,
     v_ref=None,
     v_worst=None,
-    k_penalty=0.5,
+    true_cost_penalty_scale=0.35,
     tau=0.2,
     alpha=0.7,
     beta=10.0,
@@ -2473,7 +2473,7 @@ def evaluate_layout(
         D = getManhattanDistances(fac_x, fac_y)
     TM = getTransportIntensity(D, F)
     mhc = float(np.sum(TM))
-    cost_data = calculate_cost(
+    cost_data = calculate_true_cost(
         mhc,
         fac_b,
         fac_h,
@@ -2481,7 +2481,7 @@ def evaluate_layout(
         fac_limit_aspect,
         v_ref=v_ref,
         v_worst=v_worst,
-        k_penalty=k_penalty,
+        true_cost_penalty_scale=true_cost_penalty_scale,
         tau=tau,
         alpha=alpha,
         beta=beta,
@@ -2508,7 +2508,7 @@ def evaluate_layout(
     }
 
 
-def evaluate_layout_fast(
+def evaluate_layout_fast_true_cost(
     fbs_model: FBSModel,
     area,
     H,
@@ -2516,7 +2516,7 @@ def evaluate_layout_fast(
     fac_limit_aspect,
     v_ref=None,
     v_worst=None,
-    k_penalty=0.5,
+    true_cost_penalty_scale=0.35,
     tau=0.2,
     alpha=0.7,
     beta=10.0,
@@ -2536,7 +2536,7 @@ def evaluate_layout_fast(
         D = getManhattanDistances(fac_x, fac_y)
     TM = getTransportIntensity(D, F)
     mhc = float(np.sum(TM))
-    cost_data = calculate_cost(
+    cost_data = calculate_true_cost(
         mhc,
         fac_b,
         fac_h,
@@ -2544,7 +2544,7 @@ def evaluate_layout_fast(
         fac_limit_aspect,
         v_ref=v_ref,
         v_worst=v_worst,
-        k_penalty=k_penalty,
+        true_cost_penalty_scale=true_cost_penalty_scale,
         tau=tau,
         alpha=alpha,
         beta=beta,
@@ -2569,3 +2569,91 @@ def evaluate_layout_fast(
         "v_ref": None if (v_ref is None and v_worst is None) else float(v_ref if v_ref is not None else v_worst),
         "v_worst": None if (v_ref is None and v_worst is None) else float(v_ref if v_ref is not None else v_worst),
     }
+
+
+def calculate_cost(
+    mhc,
+    fac_b,
+    fac_h,
+    area,
+    fac_limit_aspect,
+    v_ref=None,
+    v_worst=None,
+    k_penalty=0.35,
+    tau=0.2,
+    alpha=0.7,
+    beta=10.0,
+):
+    return calculate_true_cost(
+        mhc,
+        fac_b,
+        fac_h,
+        area,
+        fac_limit_aspect,
+        v_ref=v_ref,
+        v_worst=v_worst,
+        true_cost_penalty_scale=k_penalty,
+        tau=tau,
+        alpha=alpha,
+        beta=beta,
+    )
+
+
+def evaluate_layout(
+    fbs_model: FBSModel,
+    area,
+    H,
+    F,
+    fac_limit_aspect,
+    v_ref=None,
+    v_worst=None,
+    k_penalty=0.35,
+    tau=0.2,
+    alpha=0.7,
+    beta=10.0,
+    distance_metric="manhattan",
+):
+    return evaluate_layout_true_cost(
+        fbs_model,
+        area,
+        H,
+        F,
+        fac_limit_aspect,
+        v_ref=v_ref,
+        v_worst=v_worst,
+        true_cost_penalty_scale=k_penalty,
+        tau=tau,
+        alpha=alpha,
+        beta=beta,
+        distance_metric=distance_metric,
+    )
+
+
+def evaluate_layout_fast(
+    fbs_model: FBSModel,
+    area,
+    H,
+    F,
+    fac_limit_aspect,
+    v_ref=None,
+    v_worst=None,
+    k_penalty=0.35,
+    tau=0.2,
+    alpha=0.7,
+    beta=10.0,
+    distance_metric="manhattan",
+):
+    return evaluate_layout_fast_true_cost(
+        fbs_model,
+        area,
+        H,
+        F,
+        fac_limit_aspect,
+        v_ref=v_ref,
+        v_worst=v_worst,
+        true_cost_penalty_scale=k_penalty,
+        tau=tau,
+        alpha=alpha,
+        beta=beta,
+        distance_metric=distance_metric,
+    )

@@ -35,7 +35,34 @@ ALGORITHM_SPECS = {
         key="bimo4",
         algorithm_name="ELP_DRL_BiMO4",
         module_name="src.algorithms.ELP_DRL_BiMO4",
-        extra_env={},
+        extra_env={
+            "ELP_BIMO_CR_PAIR_INSERT_ENABLE": "0",
+            "ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE": "1",
+        },
+    ),
+    "bimo4_mechfix": AlgorithmSpec(
+        key="bimo4_mechfix",
+        algorithm_name="ELP_DRL_BiMO4_MECHFIX",
+        module_name="src.algorithms.ELP_DRL_BiMO4",
+        extra_env={
+            "ELP_BIMO_CR_PAIR_INSERT_ENABLE": "0",
+            "ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE": "0",
+        },
+    ),
+    "bimo4_paperls_intensify": AlgorithmSpec(
+        key="bimo4_paperls_intensify",
+        algorithm_name="ELP_DRL_BiMO4_PAPERLS_INTENSIFY",
+        module_name="src.algorithms.ELP_DRL_BiMO4",
+        extra_env={
+            "ELP_BIMO_CR_PAIR_INSERT_ENABLE": "0",
+            "ELP_BIMO_CR_BOUNDARY_REPARTITION_ENABLE": "1",
+            "ELP_BIMO_ARCHIVE_PAPERLS_ENABLE": "1",
+            "ELP_BIMO_ARCHIVE_PAPERLS_ANCHORS": "8",
+            "ELP_BIMO_ARCHIVE_PAPERLS_PASSES": "2",
+            "ELP_BIMO_ARCHIVE_PAPERLS_RESERVE_SECONDS": "80",
+            "ELP_BIMO_ARCHIVE_PAPERLS_TIME_LIMIT_SECONDS": "80",
+            "ELP_BIMO_ARCHIVE_PAPERLS_MAX_NEIGHBORS": "0",
+        },
     ),
     "nsga2": AlgorithmSpec(
         key="nsga2",
@@ -86,6 +113,7 @@ def parse_args():
     parser.add_argument("--seed-count", type=int, default=10, help="默认种子数量。")
     parser.add_argument("--seeds", nargs="+", type=int, default=None, help="显式种子列表，优先级高于 seed-base/seed-count。")
     parser.add_argument("--phase", default="main", help="实验阶段标签，例如 smoke/main/validation。")
+    parser.add_argument("--run-tag", default="", help="同一 benchmark-id 下并行后台任务的计划和状态文件后缀。")
     parser.add_argument("--dry-run", action="store_true", help="仅生成计划，不实际执行。")
     parser.add_argument("--force-rerun", action="store_true", help="忽略计划状态文件中的完成记录。")
     parser.add_argument("--python", default=sys.executable, help="执行 Python 解释器路径。")
@@ -115,6 +143,25 @@ def build_remark(benchmark_id, budget_seconds, seed, phase):
         f"launcher=run_bimo4_comparison.py;"
         f"launched_at={launched_at}"
     )
+
+
+INHERITED_EXPERIMENT_ENV_PREFIXES = (
+    "ELP_BIMO_",
+    "ELP_GRASP_",
+    "ELP_MO_BASELINE_",
+)
+INHERITED_EXPERIMENT_ENV_NAMES = {
+    "ELP_FIXED_SEEDS",
+    "ELP_MO_BASELINE_ALGO",
+}
+
+
+def clear_inherited_experiment_env(env):
+    for name in list(env.keys()):
+        if name in INHERITED_EXPERIMENT_ENV_NAMES or any(
+            name.startswith(prefix) for prefix in INHERITED_EXPERIMENT_ENV_PREFIXES
+        ):
+            env.pop(name, None)
 
 
 def build_run_matrix(args, seeds):
@@ -164,6 +211,8 @@ def build_run_env(args, row):
     seed = int(row["seed"])
     remark = build_remark(args.benchmark_id, budget_seconds, seed, row["phase"])
     env = os.environ.copy()
+    # 算法行为必须由当前 spec 决定，不能继承上一次 PowerShell 会话中的实验开关。
+    clear_inherited_experiment_env(env)
     env.update(
         {
             "PYTHONUTF8": "1",
@@ -261,12 +310,14 @@ def main():
     seeds = build_seed_list(args)
     output_dir = benchmark_root(RESULT_ROOT, args.benchmark_id)
     output_dir.mkdir(parents=True, exist_ok=True)
+    run_tag = sanitize_filename(str(args.run_tag).strip()) if str(args.run_tag).strip() else ""
+    run_tag_suffix = f"-{run_tag}" if run_tag else ""
 
     run_frame = build_run_matrix(args, seeds)
     preflight_check(args, run_frame)
-    plan_path = output_dir / "run_plan.csv"
-    manifest_path = output_dir / "run_manifest.json"
-    status_path = output_dir / "run_status.json"
+    plan_path = output_dir / f"run_plan{run_tag_suffix}.csv"
+    manifest_path = output_dir / f"run_manifest{run_tag_suffix}.json"
+    status_path = output_dir / f"run_status{run_tag_suffix}.json"
 
     status_map = load_status_map(status_path)
     plan_records = []
@@ -282,6 +333,7 @@ def main():
         json.dumps(
             {
                 "benchmarkId": args.benchmark_id,
+                "runTag": run_tag,
                 "instances": list(args.instances),
                 "algorithms": [ALGORITHM_SPECS[key].algorithm_name for key in args.algorithms],
                 "budgets": [int(value) for value in args.budgets],
